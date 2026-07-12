@@ -8,7 +8,7 @@
 
 | Resource | Minimum | Recommended |
 |----------|---------|-------------|
-| RAM | 20 GB | 32 GB |
+| RAM | 24 GB | 32 GB |
 | CPU Cores | 6 cores | 8+ cores |
 | Free Disk Space | 270 GB | 350 GB |
 | OS | Windows 10/11 64-bit | Windows 11 64-bit |
@@ -17,12 +17,12 @@
 
 | VM | Role | RAM | CPUs | Disk |
 |----|------|-----|------|------|
-| Kali Linux | Attacker | 8 GB | 2 | 128 GB |
-| DC01 | Windows Server 2019 Domain Controller | 4 GB | 2 | 60 GB |
-| WS01 | Windows 11 Workstation | 4 GB | 2 | 80 GB |
-| **Total** | | **16 GB** | **6** | **268 GB** |
+| Kali Linux | Attacker | 8+ GB | 2 | 128 GB |
+| DC01 | Windows Server 2019 Domain Controller | 8 GB | 2 | 60 GB |
+| WS01 | Windows 11 Workstation | 8 GB | 2 | 80 GB |
+| **Total** | | **24 GB** | **6** | **268 GB** |
 
-> Host RAM = VM total (16 GB) + Windows host overhead (4–8 GB). 32 GB is strongly recommended.
+
 
 ---
 
