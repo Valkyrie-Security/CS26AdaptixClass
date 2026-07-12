@@ -1,0 +1,9 @@
+.vagrant/
+.venv/
+.vscode/
+notes.md
+virtualmachines/virtualbox/.vagrant
+virtualmachines/vmware/.vagrant
+TODO.md
+dev/
+dev/images/

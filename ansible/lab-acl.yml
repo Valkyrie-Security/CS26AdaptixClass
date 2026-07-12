@@ -1,0 +1,119 @@
+---
+# Apply ACL misconfigurations from ad/data/config.json -> domains[].acls
+# Each ACL entry: { for: <principal>, to: <target>, right: <right>, inheritance: <None|All> }
+- name: Configure AD ACL misconfigurations
+  hosts: dc
+  gather_facts: false
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Set domain facts
+      ansible.builtin.set_fact:
+        domain_name: "{{ lab.lab.hosts[inventory_hostname].domain }}"
+        domain_cfg: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain] }}"
+        domain_password: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain].domain_password }}"
+
+    - name: Apply ACL misconfigurations from config
+      ansible.windows.win_powershell:
+        script: |
+          [CmdletBinding()]
+          param (
+            [String]$for,
+            [String]$to,
+            [String]$right,
+            [String]$inheritance
+          )
+          Import-Module ActiveDirectory
+          Set-Location AD:
+
+          $aclValues = 'AccessSystemSecurity','CreateChild','Delete','DeleteChild','DeleteTree',
+                       'ExtendedRight','GenericAll','GenericExecute','GenericRead','GenericWrite',
+                       'ListChildren','ListObject','ReadControl','ReadProperty','Self',
+                       'Synchronize','WriteDacl','WriteOwner','WriteProperty'
+
+          $aclExtendValues = 'Ext-User-Force-Change-Password','Ext-Self-Self-Membership',
+                             'Ext-Write-Self-Membership','Ext-ManageCA','Ext-Write-SPN',
+                             'AddMembers','WriteKeyCredentialLink','Owns'
+
+          $aclExtendedValueRightGUID = @{
+            "Ext-User-Force-Change-Password" = @("ExtendedRight","00299570-246d-11d0-a768-00aa006e0529")
+            "Ext-Write-Self-Membership"      = @("WriteProperty","bf9679c0-0de6-11d0-a285-00aa003049e2")
+            "Ext-Self-Self-Membership"       = @("Self","bf9679c0-0de6-11d0-a285-00aa003049e2")
+            "Ext-ManageCA"                   = @("ExtendedRight","18e470eb-9b98-47c5-896e-146c5c77100d")
+            "Ext-Write-SPN"                  = @("WriteProperty","f3a64788-5306-11d1-a9c5-0000f80367c1")
+            "AddMembers"                     = @("WriteProperty","bf9679c0-0de6-11d0-a285-00aa003049e2")
+            "WriteKeyCredentialLink"         = @("WriteProperty","5b47d60f-6090-40b2-9f37-2a4de88f3063")
+            "Owns"                           = @("WriteOwner",$null)
+          }
+
+          if ($for.StartsWith("NT AUTHORITY")) {
+            $forSID = New-Object System.Security.Principal.NTAccount "$for"
+          } else {
+            $forSID = New-Object System.Security.Principal.SecurityIdentifier (
+              Get-ADObject -Filter "SamAccountName -eq '$for'" -Properties objectSID
+            ).objectSID
+          }
+
+          try {
+            $objAcl = Get-Acl -Path "$to" -ErrorAction Stop
+            $objOU  = $to
+          } catch [System.Management.Automation.ItemNotFoundException] {
+            $extra_args = @{}
+            if ($to -match "\\") {
+              $extra_args.Server = $to.Split("\")[0]
+              $to = $to.Split("\")[1]
+            }
+            $toObj = Get-ADObject -Filter "SamAccountName -eq '$to'" @extra_args
+            $objOU  = $toObj.DistinguishedName
+            $objAcl = Get-Acl -Path "$objOU"
+          }
+
+          $type            = [System.Security.AccessControl.AccessControlType]"Allow"
+          $inheritanceType = [System.DirectoryServices.ActiveDirectorySecurityInheritance]$inheritance
+          $ace             = $null
+
+          if ($aclValues.contains($right)) {
+            $adRight = [System.DirectoryServices.ActiveDirectoryRights]$right
+            $ace = New-Object System.DirectoryServices.ActiveDirectoryAccessRule $forSID,$adRight,$type,$inheritanceType
+          }
+          if ($aclExtendValues.contains($right)) {
+            $guid     = $aclExtendedValueRightGUID[$right][1]
+            $extright = $aclExtendedValueRightGUID[$right][0]
+            $adRight  = [System.DirectoryServices.ActiveDirectoryRights]$extright
+            if ($guid) {
+              $ace = New-Object System.DirectoryServices.ActiveDirectoryAccessRule $forSID,$adRight,$type,$guid,$inheritanceType
+            } else {
+              $ace = New-Object System.DirectoryServices.ActiveDirectoryAccessRule $forSID,$adRight,$type,$inheritanceType
+            }
+          }
+
+          $Ansible.Changed = $false
+          if ($ace) {
+            $objAcl.AddAccessRule($ace)
+            Set-Acl -AclObject $objAcl -Path "$objOU"
+            $Ansible.Changed = $true
+          }
+        parameters:
+          for: "{{ item.value.for }}"
+          to: "{{ item.value.to }}"
+          right: "{{ item.value.right }}"
+          inheritance: "{{ item.value.inheritance }}"
+      vars:
+        ansible_become: true
+        ansible_become_method: runas
+        ansible_become_user: "Administrator@{{ domain_name }}"
+        ansible_become_password: "{{ domain_password }}"
+      with_dict: "{{ domain_cfg.acls }}"
+      loop_control:
+        label: "{{ item.key }}"
+      failed_when: false
+
+    - name: Run badacl.ps1 (backup misconfigured ACLs)
+      ansible.windows.win_shell: |
+        powershell.exe -File C:\setup\scripts\badacl.ps1
+      changed_when: true
+      failed_when: false

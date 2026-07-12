@@ -1,0 +1,154 @@
+---
+# Baseline Windows configuration for all hosts before domain setup
+- name: Configure Windows server baselines
+  hosts: cheddarsale
+  gather_facts: false
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Set hostname from config.json
+      ansible.windows.win_hostname:
+        name: "{{ lab.lab.hosts[inventory_hostname].hostname }}"
+      when: inventory_hostname in lab.lab.hosts
+      register: hostname_result
+
+    - name: Reboot to apply hostname change
+      ansible.windows.win_reboot:
+        reboot_timeout: 300
+        post_reboot_delay: 15
+      when: hostname_result.reboot_required | default(false)
+
+    - name: Set all NICs to Private network category
+      ansible.windows.win_shell: |
+        Get-NetConnectionProfile | Set-NetConnectionProfile -NetworkCategory Private
+      become: true
+      changed_when: true
+      failed_when: false
+
+    - name: Set local Administrator password
+      ansible.windows.win_user:
+        name: Administrator
+        password: "{{ lab.lab.hosts[inventory_hostname].local_admin_password }}"
+        password_never_expires: true
+        account_disabled: false
+      when: inventory_hostname in lab.lab.hosts
+
+    - name: Ensure WinRM HTTPS listener is present
+      ansible.windows.win_shell: |
+        if (-not (Get-WSManInstance -ResourceURI winrm/config/Listener -SelectorSet @{Address='*';Transport='HTTPS'} -ErrorAction SilentlyContinue)) {
+          $cert = New-SelfSignedCertificate -DnsName $env:COMPUTERNAME -CertStoreLocation Cert:\LocalMachine\My
+          New-WSManInstance -ResourceURI winrm/config/Listener -SelectorSet @{Address='*';Transport='HTTPS'} -ValueSet @{Hostname=$env:COMPUTERNAME;CertificateThumbprint=$cert.Thumbprint}
+        }
+      changed_when: false
+
+    - name: Allow WinRM through firewall
+      community.windows.win_firewall_rule:
+        name: "WinRM HTTPS"
+        localport: 5986
+        action: allow
+        direction: in
+        protocol: tcp
+        state: present
+        enabled: true
+
+    - name: Set power plan to high performance
+      ansible.windows.win_shell: |
+        $HighPerf = powercfg -l | ForEach-Object { if ($_ -match 'High performance') { $_.Split()[3] } }
+        if ($HighPerf) {
+          $CurrPlan = (powercfg -getactivescheme).Split()[3]
+          if ($CurrPlan -ne $HighPerf) { powercfg -setactive $HighPerf }
+        }
+      changed_when: false
+      failed_when: false
+
+    - name: Disable screensaver and monitor timeout
+      ansible.windows.win_shell: |
+        Set-ItemProperty "HKCU:\Control Panel\Desktop" -Name ScreenSaveActive -Value 0 -Type DWord
+        powercfg -x -monitor-timeout-ac 0
+        powercfg -x -monitor-timeout-dc 0
+      changed_when: false
+      failed_when: false
+
+    - name: Install winget
+      ansible.windows.win_shell: |
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Confirm:$false
+        Import-PackageProvider -Name NuGet -Force
+        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+        Install-Script -Name winget-install -Force -Scope CurrentUser
+        winget-install.ps1
+      failed_when: false
+      changed_when: false
+
+    - name: Install baseline packages via winget
+      ansible.windows.win_shell: |
+        winget install --id Git.Git -e --silent --accept-source-agreements --accept-package-agreements
+        winget install --id Microsoft.WindowsTerminal -e --silent --accept-source-agreements --accept-package-agreements
+        winget install --id 7zip.7zip -e --silent --accept-source-agreements --accept-package-agreements
+      register: winget_result
+      changed_when: winget_result.rc == 0
+      failed_when: false
+
+    - name: Create setup directory
+      ansible.windows.win_file:
+        path: C:\setup
+        state: directory
+
+    - name: Copy AD scripts to host
+      ansible.windows.win_copy:
+        src: "{{ playbook_dir }}/../ad/scripts/"
+        dest: C:\setup\scripts\
+
+- name: Configure DC-specific baseline
+  hosts: dc
+  gather_facts: false
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Install AD-DS and DNS management tools
+      ansible.windows.win_feature:
+        name:
+          - AD-Domain-Services
+          - DNS
+          - RSAT-AD-Tools
+          - RSAT-DNS-Server
+          - GPMC
+        state: present
+        include_management_tools: true
+      register: ad_feature
+
+    - name: Reboot if features require it
+      ansible.windows.win_reboot:
+      when: ad_feature.reboot_required
+
+- name: Configure workstation-specific baseline
+  hosts: workstations
+  gather_facts: false
+
+  tasks:
+    - name: Create Administrator profile directories
+      ansible.windows.win_file:
+        path: "C:\\Users\\Administrator\\{{ item }}"
+        state: directory
+      loop:
+        - .ssh
+        - Contacts
+        - Desktop
+        - Documents
+        - Downloads
+        - Favorites
+        - Links
+        - Music
+        - OneDrive
+        - Pictures
+        - Saved Games
+        - Searches
+        - Videos

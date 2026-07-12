@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body        { font-family: Arial, sans-serif; background-color: #f4f4f4; margin: 0; padding: 20px; }
+    .container  { max-width: 620px; margin: 0 auto; background-color: #ffffff; border: 1px solid #dddddd;
+                  border-radius: 6px; overflow: hidden; }
+    .header     { background-color: #003366; padding: 24px 32px; }
+    .header h1  { color: #ffffff; font-size: 20px; margin: 0; }
+    .body       { padding: 32px; color: #333333; font-size: 15px; line-height: 1.6; }
+    .body h2    { font-size: 17px; color: #003366; margin-top: 0; }
+    .callout    { background-color: #fff4e5; border-left: 4px solid #e07b00; padding: 14px 18px;
+                  margin: 24px 0; border-radius: 4px; }
+    .callout p  { margin: 0; font-size: 14px; }
+    .steps      { margin: 20px 0; padding-left: 20px; }
+    .steps li   { margin-bottom: 8px; }
+    .footer     { background-color: #f0f0f0; padding: 16px 32px; font-size: 12px; color: #777777;
+                  border-top: 1px solid #dddddd; }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <div class="header">
+      <h1>IT HelpDesk &mdash; Action Required</h1>
+    </div>
+
+    <div class="body">
+      <h2>Password Change Reminder</h2>
+
+      <p>
+        Hello {{ selected_autologon_user.split('.') | map('capitalize') | join(' ') }},
+      </p>
+
+      <p>
+        This is a reminder from the <strong>HelpDesk Support Team</strong> that your account
+        (<strong>{{ selected_autologon_domain_user }}</strong>) is currently using the
+        default temporary password assigned at account creation.
+      </p>
+
+      <div class="callout">
+        <p>
+          <strong>Action Required:</strong> You must change your password before your next
+          login session. Accounts using the default password are flagged for forced reset and
+          may be locked out without further notice.
+        </p>
+      </div>
+
+      <p>To change your password, follow these steps:</p>
+      <ol class="steps">
+        <li>Press <strong>Ctrl + Alt + Delete</strong> and select <em>Change a password</em>.</li>
+        <li>Enter your current (temporary) password: <code>{{ selected_autologon_password }}</code></li>
+        <li>Enter and confirm your new password.</li>
+        <li>Click the arrow to apply the change.</li>
+      </ol>
+
+      <p>
+        Your new password must meet the following requirements:
+      </p>
+      <ul class="steps">
+        <li>Minimum 12 characters</li>
+        <li>At least one uppercase letter, one lowercase letter, one number, and one special character</li>
+        <li>Cannot reuse your previous password</li>
+      </ul>
+
+      <p>
+        If you experience any issues or have already changed your password, please disregard
+        this message. For assistance, contact the HelpDesk at
+        <a href="mailto:helpdesk@{{ host_cfg.domain }}">helpdesk@{{ host_cfg.domain }}</a>.
+      </p>
+
+      <p>Thank you for helping us keep our environment secure.</p>
+
+      <p>
+        Regards,<br>
+        <strong>HelpDesk Support Team</strong><br>
+        IT Department
+      </p>
+    </div>
+
+    <div class="footer">
+      This is an automated message generated for {{ selected_autologon_domain_user }}.
+      Do not reply directly to this email.
+    </div>
+
+  </div>
+</body>
+</html>

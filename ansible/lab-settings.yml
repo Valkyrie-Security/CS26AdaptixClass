@@ -1,0 +1,15 @@
+---
+- name: Disable Windows Update
+  hosts: no_update
+  roles:
+    - { role: 'settings/no_updates', tags: 'no_updates' }
+
+- name: Enable Windows Update
+  hosts: update
+  roles:
+    - { role: 'settings/updates', tags: 'updates' }
+
+- name: Disable Windows Defender
+  hosts: disable_defender
+  roles:
+    - { role: 'settings/disable_defender', tags: 'disable_defender' }

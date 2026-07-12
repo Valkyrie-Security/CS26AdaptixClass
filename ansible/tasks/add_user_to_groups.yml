@@ -1,0 +1,13 @@
+---
+# Helper task: add a single user to each of their assigned groups
+- name: "Add {{ user_item.key }} to group {{ group_item }}"
+  microsoft.ad.group:
+    name: "{{ group_item }}"
+    members:
+      add:
+        - "{{ user_item.key }}"
+    state: present
+  loop: "{{ user_item.value.groups | default([]) }}"
+  loop_control:
+    loop_var: group_item
+    label: "{{ user_item.key }} -> {{ group_item }}"

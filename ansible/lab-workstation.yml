@@ -1,0 +1,486 @@
+---
+- name: Configure workstation vulnerabilities
+  hosts: workstations
+  gather_facts: false
+
+  vars:
+    workstation_script: C:\setup\scripts\HostConfig.ps1
+    winget_script: C:\setup\scripts\winget-packages.ps1
+    vs_components_script: C:\setup\scripts\vs-components.ps1
+    autologon_zip: C:\setup\scripts\Autologon.zip
+    autologon_dir: C:\setup\scripts\Autologon
+    autologon_exe: C:\setup\scripts\Autologon\Autologon64.exe
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Set host facts
+      ansible.builtin.set_fact:
+        host_cfg: "{{ lab.lab.hosts[inventory_hostname] }}"
+        domain_cfg: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain] }}"
+
+    - name: Set autologon user facts
+      ansible.builtin.set_fact:
+        selected_autologon_user: "{{ autologon_user | default(host_cfg.assigned_user) }}"
+        selected_autologon_password: "{{ lab.lab.domains[host_cfg.domain].users[autologon_user | default(host_cfg.assigned_user)].password }}"
+        selected_autologon_domain_user: "{{ host_cfg.domain.split('.')[0] | upper }}\\{{ autologon_user | default(host_cfg.assigned_user) }}"
+
+    - name: Detect NIC names
+      ansible.builtin.include_tasks: tasks/detect_nics.yml
+
+    - name: Create setup directory
+      ansible.windows.win_file:
+        path: C:\setup
+        state: directory
+
+    - name: Create setup scripts directory
+      ansible.windows.win_file:
+        path: C:\setup\scripts
+        state: directory
+
+    - name: Create Autologon extract directory
+      ansible.windows.win_file:
+        path: "{{ autologon_dir }}"
+        state: directory
+
+    - name: Enable NAT NIC for internet access
+      ansible.windows.win_shell: |
+        Enable-NetAdapter -Name "{{ nic_nat }}" -Confirm:$false -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 5
+      changed_when: false
+      failed_when: false
+
+    - name: Set NAT NIC DNS to public for external downloads
+      ansible.windows.win_shell: |
+        Set-DnsClientServerAddress -InterfaceAlias "{{ nic_nat }}" -ServerAddresses "8.8.8.8","8.8.4.4"
+      changed_when: false
+      failed_when: false
+
+    - name: Download Sysinternals Autologon
+      ansible.windows.win_get_url:
+        url: https://download.sysinternals.com/files/AutoLogon.zip
+        dest: "{{ autologon_zip }}"
+        force: false
+
+    - name: Copy workstation vulnerability script to host
+      ansible.windows.win_get_url:
+        url: https://raw.githubusercontent.com/orthrus1775/Windows-PrivEsc-Setup/master/vuln-config.ps1
+        dest: "{{ workstation_script }}"
+        force: true
+
+    - name: Extract Sysinternals Autologon
+      community.windows.win_unzip:
+        src: "{{ autologon_zip }}"
+        dest: "{{ autologon_dir }}"
+        delete_archive: false
+
+    - name: Configure autologon for credential_manager user
+      ansible.windows.win_shell: |
+        & "{{ autologon_exe }}" "{{ host_cfg.vulns_vars['credential_manager'].runas }}" "{{ domain_cfg.netbios_name }}" '{{ host_cfg.vulns_vars['credential_manager'].runas_password }}' /accepteula
+      args:
+        executable: powershell
+      changed_when: true
+      when: "'credential_manager' in host_cfg.vulns"
+
+    - name: Reboot workstation
+      ansible.windows.win_reboot:
+        reboot_timeout: 1800
+
+    - name: Store DPAPI credentials in Credential Manager
+      ansible.windows.win_credential:
+        name: "{{ host_cfg.vulns_vars['credential_manager'].target }}"
+        type: domain_password
+        username: "{{ host_cfg.vulns_vars['credential_manager'].username }}"
+        secret: "{{ host_cfg.vulns_vars['credential_manager'].password }}"
+        comment: "Credential for {{ host_cfg.vulns_vars['credential_manager'].username }}"
+        persistence: local
+        state: present
+      vars:
+        ansible_become: true
+        ansible_become_method: runas
+        ansible_become_user: "{{ host_cfg.vulns_vars['credential_manager'].runas }}"
+        ansible_become_pass: "{{ host_cfg.vulns_vars['credential_manager'].runas_password }}"
+      register: cred_result
+      failed_when: false
+      when: "'credential_manager' in host_cfg.vulns"
+
+    - name: Configure autologon for admin_runner user
+      ansible.windows.win_shell: |
+        & "{{ autologon_exe }}" "{{ host_cfg.vulns_vars['admin_runner'].runas }}" "{{ domain_cfg.netbios_name }}" '{{ host_cfg.vulns_vars['admin_runner'].runas_password }}' /accepteula
+      args:
+        executable: powershell
+      changed_when: true
+      when: "'credential_manager' in host_cfg.vulns"
+
+    - name: Reboot workstation
+      ansible.windows.win_reboot:
+        reboot_timeout: 1800
+
+    - name: Create MMC startup task for admin_runner user
+      community.windows.win_scheduled_task:
+        name: ITManagementConsole
+        description: Launches management console for system configuration and monitoring - configured by IT
+        actions:
+          - path: mmc.exe
+        triggers:
+          - type: logon
+        username: "{{ domain_cfg.netbios_name }}\\{{ host_cfg.vulns_vars['admin_runner'].runas }}"
+        password: "{{ host_cfg.vulns_vars['admin_runner'].runas_password }}"
+        run_level: highest
+        state: present
+        logon_type: password
+        enabled: true
+      when: "'admin_runner' in host_cfg.vulns_vars"
+
+    - name: Create LabManagement watchdog task
+      community.windows.win_scheduled_task:
+        name: LabManagement
+        description: Monitors ITManagementConsole and restarts it if not running
+        actions:
+          - path: powershell.exe
+            arguments: >-
+              -NonInteractive -WindowStyle Hidden -Command
+              "if ((Get-ScheduledTask -TaskName 'ITManagementConsole').State -ne 'Running') {
+                Start-ScheduledTask -TaskName 'ITManagementConsole'
+              }"
+        triggers:
+          - type: time
+            start_boundary: "2000-01-01T00:00:00"
+            repetition:
+              interval: PT5M
+              stop_at_duration_end: false
+        username: vagrant
+        password: vagrant
+        run_level: highest
+        state: present
+        logon_type: password
+        enabled: true
+      when: "'admin_runner' in host_cfg.vulns_vars"
+
+    - name: Create credential-caching task for credential_manager user
+      community.windows.win_scheduled_task:
+        name: UserProfileSync
+        description: Synchronizes user profile settings on startup
+        actions:
+          - path: cmd.exe
+            arguments: /c exit
+        triggers:
+          - type: boot
+        username: "{{ domain_cfg.netbios_name }}\\{{ host_cfg.vulns_vars['credential_manager'].runas }}"
+        password: "{{ host_cfg.vulns_vars['credential_manager'].runas_password }}"
+        run_level: limited
+        state: present
+        logon_type: password
+        enabled: true
+      when: "'credential_manager' in host_cfg.vulns_vars"
+
+    - name: Create credential-caching task for admin_runner user
+      community.windows.win_scheduled_task:
+        name: AppCompatibilityUpdate
+        description: Updates application compatibility settings
+        actions:
+          - path: cmd.exe
+            arguments: /c exit
+        triggers:
+          - type: boot
+        username: "{{ domain_cfg.netbios_name }}\\{{ host_cfg.vulns_vars['admin_runner'].runas }}"
+        password: "{{ host_cfg.vulns_vars['admin_runner'].runas_password }}"
+        run_level: limited
+        state: present
+        logon_type: password
+        enabled: true
+      when: "'admin_runner' in host_cfg.vulns_vars"
+
+    - name: Create credential-caching task for selected autologon user
+      community.windows.win_scheduled_task:
+        name: UserEnvironmentInit
+        description: Initializes user environment settings at startup
+        actions:
+          - path: cmd.exe
+            arguments: /c exit
+        triggers:
+          - type: boot
+        username: "{{ domain_cfg.netbios_name }}\\{{ selected_autologon_user }}"
+        password: "{{ selected_autologon_password }}"
+        run_level: limited
+        state: present
+        logon_type: password
+        enabled: true
+
+    - name: Execute workstation vulnerability script
+      ansible.windows.win_shell: |
+        powershell -ExecutionPolicy Bypass -File "{{ workstation_script }}"
+      changed_when: true
+
+    - name: Remove workstation vulnerability script
+      ansible.windows.win_file:
+        path: "{{ workstation_script }}"
+        state: absent
+
+    - name: Grant LocalSupport log on as batch job
+      ansible.windows.win_user_right:
+       name: SeBatchLogonRight
+       users:
+        - LocalSupport
+       action: add
+
+    - name: Create credential-caching task for LocalSupport
+      community.windows.win_scheduled_task:
+        name: LocalSupportMaintenance
+        description: Performs local system maintenance tasks
+        actions:
+          - path: cmd.exe
+            arguments: /c exit
+        triggers:
+          - type: boot
+        username: LocalSupport
+        password: "P@ssw0rd123!"
+        run_level: limited
+        state: present
+        logon_type: password
+        enabled: true
+
+    - name: Configure autologon for LocalSupport
+      ansible.windows.win_shell: |
+        & "{{ autologon_exe }}" "LocalSupport" "." 'P@ssw0rd123!' /accepteula
+      args:
+        executable: powershell
+      changed_when: true
+
+    - name: Reboot workstation
+      ansible.windows.win_reboot:
+        reboot_timeout: 1800
+        post_reboot_delay: 60
+
+    - name: Configure autologon for selected user
+      ansible.windows.win_shell: |
+        & "{{ autologon_exe }}" "{{ selected_autologon_user }}" "{{ domain_cfg.netbios_name }}" '{{ selected_autologon_password }}' /accepteula
+      args:
+        executable: powershell
+      changed_when: true
+
+    - name: Copy winget packages script to host
+      ansible.windows.win_copy:
+        src: "{{ playbook_dir }}/files/winget-packages.ps1"
+        dest: "{{ winget_script }}"
+
+    - name: Ensure autologon user is a local administrator
+      ansible.windows.win_group_membership:
+        name: Administrators
+        members:
+          - "{{ domain_cfg.netbios_name }}\\{{ selected_autologon_user }}"
+        state: present
+
+    - name: Reboot workstation
+      ansible.windows.win_reboot:
+        reboot_timeout: 1800      
+
+    - name: Execute winget packages script
+      ansible.windows.win_shell: |
+        powershell -ExecutionPolicy Bypass -File "{{ winget_script }}"
+      vars:
+        ansible_become: true
+        ansible_become_method: runas
+        ansible_become_user: "{{ selected_autologon_domain_user }}"
+        ansible_become_pass: "{{ selected_autologon_password }}"        
+      changed_when: true
+
+    - name: Check if Visual Studio installer is present
+      ansible.windows.win_stat:
+        path: 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\setup.exe'
+      register: vs_installer
+
+    - name: Warn if Visual Studio was not installed successfully
+      ansible.builtin.debug:
+        msg: "WARNING: Visual Studio installer not found - Visual Studio may not have installed successfully. Continuing..."
+      when: not vs_installer.stat.exists
+
+    - name: Copy VS components script to host
+      ansible.windows.win_copy:
+        src: "{{ playbook_dir }}/files/vs-components.ps1"
+        dest: "{{ vs_components_script }}"
+
+    - name: Execute VS components script
+      ansible.windows.win_shell: |
+        powershell -ExecutionPolicy Bypass -File "{{ vs_components_script }}"
+      vars:
+        ansible_become: true
+        ansible_become_method: runas
+        ansible_become_user: "{{ selected_autologon_domain_user }}"
+        ansible_become_pass: "{{ selected_autologon_password }}"
+      changed_when: true
+
+    - name: Clear C:\projects directory
+      ansible.windows.win_file:
+        path: C:\projects
+        state: absent
+
+    - name: Copy Python requirements to host
+      ansible.windows.win_copy:
+        src: "{{ playbook_dir }}/files/requirements.txt"
+        dest: C:\setup\scripts\requirements.txt
+
+    - name: Install Python requirements
+      ansible.windows.win_shell: |
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        python -m pip install -r C:\setup\scripts\requirements.txt
+      vars:
+        ansible_become: true
+        ansible_become_method: runas
+        ansible_become_user: "{{ selected_autologon_domain_user }}"
+        ansible_become_pass: "{{ selected_autologon_password }}"
+      register: pip_install
+      ignore_errors: true
+
+    - name: Upgrade pip
+      ansible.windows.win_shell: |
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        python -m pip install --upgrade pip
+      vars:
+        ansible_become: true
+        ansible_become_method: runas
+        ansible_become_user: "{{ selected_autologon_domain_user }}"
+        ansible_become_pass: "{{ selected_autologon_password }}"
+      when: pip_install.rc == 0
+      ignore_errors: true
+
+    - name: Ensure C:\DevTools exists
+      ansible.windows.win_file:
+        path: C:\DevTools
+        state: directory
+
+    - name: Copy vmware_update script to DevTools
+      ansible.windows.win_copy:
+        src: "{{ playbook_dir }}/files/vmware_update.ps1"
+        dest: C:\DevTools\vmware_update.ps1
+
+    - name: Download FaceDancer
+      ansible.windows.win_get_url:
+        url: https://github.com/Tylous/FaceDancer/releases/download/v2.0/FaceDancer_Windows_amd64.exe
+        dest: C:\DevTools\FaceDancer.exe
+
+    - name: Clone RedTeamGrimoire
+      ansible.windows.win_shell: |
+        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        git clone https://github.com/vari-sh/RedTeamGrimoire.git C:\DevTools\RedTeamGrimoire
+      args:
+        creates: C:\DevTools\RedTeamGrimoire
+      vars:
+        ansible_become: true
+        ansible_become_method: runas
+        ansible_become_user: "{{ selected_autologon_domain_user }}"
+        ansible_become_pass: "{{ selected_autologon_password }}"
+      changed_when: true
+
+    - name: Download swarmer
+      ansible.windows.win_get_url:
+        url: https://github.com/praetorian-inc/swarmer/releases/download/v0.1.8/swarmer.exe
+        dest: C:\DevTools\swarmer.exe
+        force: false
+
+    - name: Download HiveSwarming
+      ansible.windows.win_get_url:
+        url: https://github.com/stormshield/HiveSwarming/releases/download/v1.6/HiveSwarming.exe
+        dest: C:\DevTools\HiveSwarming.exe
+        force: false
+
+    - name: Download AccessChk
+      ansible.windows.win_get_url:
+        url: https://download.sysinternals.com/files/AccessChk.zip
+        dest: C:\DevTools\
+        force: false
+
+    - name: Extract AccessChk
+      ansible.windows.win_shell: |
+        Expand-Archive -Path C:\DevTools\AccessChk.zip -DestinationPath C:\DevTools -Force
+      args:
+        executable: powershell
+        creates: C:\DevTools\accesschk64.exe
+
+    - name: Accept AccessChk EULA
+      ansible.windows.win_shell: '.\accesschk64.exe /accepteula'
+      args:
+        chdir: 'C:\DevTools'
+      failed_when: false
+
+    - name: Disable NAT NIC (prevents DNS resolution conflicts)
+      ansible.windows.win_shell: |
+        Disable-NetAdapter -Name "{{ nic_nat }}" -Confirm:$false -ErrorAction SilentlyContinue
+      changed_when: true
+      failed_when: false
+
+    - name: Force GPO update
+      ansible.windows.win_shell: gpupdate /force
+      changed_when: true
+
+    - name: Remove setup scripts
+      ansible.windows.win_find:
+        paths: C:\setup\scripts
+        patterns: "*.ps1"
+      register: ps1_files
+
+    - name: Delete found setup scripts
+      ansible.windows.win_file:
+        path: "{{ item.path }}"
+        state: absent
+      loop: "{{ ps1_files.files }}"
+
+    - name: Copy welcome email to user Desktop
+      ansible.builtin.template:
+        src: files/email.j2
+        dest: "C:\\Users\\{{ selected_autologon_user }}\\Desktop\\email.html"
+
+    - name: Remove selected autologon user from local Administrators
+      ansible.windows.win_group_membership:
+        name: Administrators
+        members:
+          - "{{ selected_autologon_domain_user }}"
+        state: absent
+
+    - name: Detect NIC names
+      ansible.builtin.include_tasks: tasks/detect_nics.yml    
+
+    - name: Enable NAT NIC for internet access
+      ansible.windows.win_shell: |
+        Enable-NetAdapter -Name "{{ nic_nat }}" -Confirm:$false -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 5
+      changed_when: false
+      failed_when: false
+      vars:
+        ansible_become: true
+        ansible_become_method: runas
+        ansible_become_user: vagrant
+        ansible_become_pass: vagrant
+
+    - name: Install Windows updates
+      ansible.windows.win_updates:
+        category_names:
+          - SecurityUpdates
+          - CriticalUpdates
+          - UpdateRollups
+        reboot: false
+        state: installed
+
+    - name: Reboot workstation
+      ansible.windows.win_reboot:
+        reboot_timeout: 1800
+
+    - name: Disable NAT NIC after updates
+      ansible.windows.win_shell: |
+        Disable-NetAdapter -Name "{{ nic_nat }}" -Confirm:$false -ErrorAction SilentlyContinue
+      changed_when: true
+      vars:
+        ansible_become: true
+        ansible_become_method: runas
+        ansible_become_user: vagrant
+        ansible_become_pass: vagrant
+
+    # Double Reboot to flush admin permissions
+    - name: Reboot workstation
+      ansible.windows.win_reboot:
+        reboot_timeout: 1800
+        
+

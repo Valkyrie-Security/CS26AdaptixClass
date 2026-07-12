@@ -1,0 +1,6 @@
+---
+try_before_lock: "5"
+pass_length: "5"
+lock_duration: "00:05:00"
+lock_observation: "00:05:00"
+complexity: false

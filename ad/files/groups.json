@@ -1,0 +1,65 @@
+{
+    "cheddarsale.local": {
+        "Administration": [
+            "HumanResources",
+            "Assessor",
+            "Budget",
+            "Clerk",
+            "Finance",
+            "Licenses"
+        ],
+        "IT": [
+            "HelpDesk",
+            "Servers"
+        ],
+        "VillageBoard": [
+            "President",
+            "Trustee",
+            "Treasurer"
+        ],
+        "Zoning": [
+            "Assessor",
+            "GIS",
+            "BuildingInspection",
+            "Engineering"
+        ],
+        "Court": [
+            "Clerks",
+            "Judges"
+        ],
+        "EconomicDevelopment": [
+            "Chamberofcommerce",
+            "Marketing"
+        ],
+        "Schools": [
+            "Schooladmin",
+            "PTA",
+            "Teachers"
+        ],
+        "Fire": [
+            "Chief",
+            "Fire_Inspector",
+            "Paramedics"
+        ],
+        "Parks": [
+            "CommunityCenter",
+            "Grounds",
+            "Fleet"
+        ],
+        "Police": [
+            "Chief",
+            "Patrol",
+            "Parking"
+        ],
+        "PublicServices": [
+            "Sanitation",
+            "Utilities",
+            "RoadwayMaintenance"
+        ],
+        "Recreation": [
+            "YouthPrograms",
+            "SeniorPrograms",
+            "RoadMaintenance"
+        ]
+    }
+}

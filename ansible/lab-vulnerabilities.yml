@@ -1,0 +1,195 @@
+---
+# Deploy attack-scenario vulnerabilities using the scripts in ad/scripts/
+# Scripts are copied to C:\setup\scripts\ by ad-servers.yml
+- name: Deploy vulnerabilities on DC
+  hosts: dc
+  gather_facts: false
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Set host facts
+      ansible.builtin.set_fact:
+        host_cfg: "{{ lab.lab.hosts[inventory_hostname] }}"
+        domain_cfg: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain] }}"
+        domain_name: "{{ lab.lab.hosts[inventory_hostname].domain }}"
+        domain_password: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain].domain_password }}"
+        domain_username: "Administrator@{{ lab.lab.hosts[inventory_hostname].domain }}"
+
+    # -------------------------------------------------------------------------
+    # Firewall - disable if configured in vulns
+    # -------------------------------------------------------------------------
+    - name: Disable Windows Firewall (all profiles)
+      ansible.windows.win_shell: |
+        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+      changed_when: true
+      when: "'disable_firewall' in host_cfg.vulns"
+
+    # -------------------------------------------------------------------------
+    # AS-REP Roasting - disable Kerberos pre-authentication
+    # -------------------------------------------------------------------------
+    - name: Disable Kerberos pre-auth on target accounts (AS-REP roasting)
+      ansible.windows.win_shell: |
+        C:\setup\scripts\asrep_roasting.ps1
+      args:
+        executable: powershell
+      changed_when: true
+
+    # -------------------------------------------------------------------------
+    # Kerberoasting - set SPN on user account
+    # -------------------------------------------------------------------------
+    - name: Set SPN for Kerberoasting
+      ansible.windows.win_shell: |
+        C:\setup\scripts\kerberoasting.ps1
+      args:
+        executable: powershell
+      changed_when: true
+
+    # -------------------------------------------------------------------------
+    # Constrained Delegation - protocol transition (Use Any Authentication)
+    # -------------------------------------------------------------------------
+    - name: Configure constrained delegation with protocol transition
+      ansible.windows.win_shell: |
+        C:\setup\scripts\constrained_delegation_use_any.ps1
+      args:
+        executable: powershell
+      changed_when: true
+
+    # -------------------------------------------------------------------------
+    # Constrained Delegation - Kerberos-only
+    # -------------------------------------------------------------------------
+    - name: Configure Kerberos-only constrained delegation
+      ansible.windows.win_shell: |
+        C:\setup\scripts\constrained_delegation_kerb_only.ps1
+      args:
+        executable: powershell
+      changed_when: true
+      failed_when: false
+
+    # -------------------------------------------------------------------------
+    # Unconstrained Delegation
+    # -------------------------------------------------------------------------
+    - name: Set unconstrained delegation on computer object
+      ansible.windows.win_shell: |
+        C:\setup\scripts\unconstrained_delegation.ps1
+      args:
+        executable: powershell
+      changed_when: true
+      failed_when: false
+
+    - name: Set unconstrained delegation on user object
+      ansible.windows.win_shell: |
+        C:\setup\scripts\unconstrained_delegation_user.ps1
+      args:
+        executable: powershell
+      changed_when: true
+      failed_when: false
+
+    # -------------------------------------------------------------------------
+    # Shadow Credentials
+    # -------------------------------------------------------------------------
+    - name: Configure shadow credentials
+      ansible.windows.win_shell: |
+        C:\setup\scripts\shadow_credentials.ps1
+      args:
+        executable: powershell
+      changed_when: true
+
+    # -------------------------------------------------------------------------
+    # RBCD (Resource-Based Constrained Delegation)
+    # -------------------------------------------------------------------------
+    - name: Grant RBCD GenericWrite 
+      ansible.windows.win_shell: |
+        C:\setup\scripts\rbcd_abuse.ps1
+      args:
+        executable: powershell
+      changed_when: true
+      failed_when: false
+
+    # -------------------------------------------------------------------------
+    # Anonymous LDAP
+    # -------------------------------------------------------------------------
+    - name: Enable anonymous LDAP queries
+      ansible.windows.win_shell: |
+        C:\setup\scripts\anonymous_ldap.ps1
+      args:
+        executable: powershell
+      changed_when: true
+      failed_when: false
+
+    # -------------------------------------------------------------------------
+    # GPO Abuse - GPO with weak permissions
+    # -------------------------------------------------------------------------
+    - name: Copy wallpaper to SYSVOL scripts share
+      ansible.windows.win_copy:
+        src: C:\setup\scripts\VillageWallpaper.png
+        dest: 'C:\Windows\SYSVOL\sysvol\{{ host_cfg.domain }}\scripts\VillageWallpaper.png'
+        remote_src: true
+
+    - name: Create vulnerable GPO
+      ansible.windows.win_shell: |
+        C:\setup\scripts\gpo_abuse.ps1
+      args:
+        executable: powershell
+      changed_when: true
+
+    # -------------------------------------------------------------------------
+    # Print Spooler
+    # -------------------------------------------------------------------------
+    - name: Enable and start Print Spooler service
+      ansible.windows.win_service:
+        name: Spooler
+        state: started
+        start_mode: auto
+
+    - name: Run print spooler vulnerability script
+      ansible.windows.win_shell: |
+        C:\setup\scripts\print_spooler.ps1
+      args:
+        executable: powershell
+      changed_when: true
+      failed_when: false
+
+    # # -------------------------------------------------------------------------
+    # # RDP Backdoor via Scheduled Task
+    # # -------------------------------------------------------------------------
+    # - name: Create RDP backdoor scheduled task
+    #   ansible.windows.win_shell: |
+    #     C:\setup\scripts\rdp_scheduler.ps1
+    #   args:
+    #     executable: powershell
+    #   changed_when: true
+    #   failed_when: false
+
+- name: Deploy vulnerabilities on workstations
+  hosts: workstations
+  gather_facts: false
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Set host facts
+      ansible.builtin.set_fact:
+        host_cfg: "{{ lab.lab.hosts[inventory_hostname] }}"
+        domain_name: "{{ lab.lab.hosts[inventory_hostname].domain }}"
+        domain_password: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain].domain_password }}"
+        domain_username: "Administrator@{{ lab.lab.hosts[inventory_hostname].domain }}"
+
+    # -------------------------------------------------------------------------
+    # Firewall
+    # -------------------------------------------------------------------------
+    - name: Disable Windows Firewall on workstation
+      ansible.windows.win_shell: |
+        Set-NetFirewallProfile -Profile Domain,Public,Private -Enabled False
+      changed_when: true
+      when: "'disable_firewall' in host_cfg.vulns"
+    
+
+
+ 

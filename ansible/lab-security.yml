@@ -1,0 +1,259 @@
+---
+- name: Pre-create DevTools directory before GPO is linked
+  hosts: cheddarsale
+  gather_facts: false
+
+  tasks:
+    - name: Ensure C:\DevTools exists
+      ansible.windows.win_file:
+        path: C:\DevTools
+        state: directory
+
+# Apply security settings from config.json -> hosts[].security and hosts[].security_vars
+- name: Apply security settings
+  hosts: dc
+  gather_facts: false
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Set host and domain facts
+      ansible.builtin.set_fact:
+        host_cfg: "{{ lab.lab.hosts[inventory_hostname] }}"
+        domain_cfg: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain] }}"
+
+    # -------------------------------------------------------------------------
+    # account_is_sensitive: mark privileged accounts as sensitive
+    # -------------------------------------------------------------------------
+    - name: Mark accounts as sensitive and cannot be delegated
+      ansible.windows.win_shell: |
+        $account = "{{ item.value.account }}"
+        Set-ADAccountControl -Identity $account -AccountNotDelegated $true
+        Write-Host "Marked $account as sensitive (cannot be delegated)"
+      loop: "{{ host_cfg.security_vars.account_is_sensitive | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when: "'account_is_sensitive' in host_cfg.security"
+      changed_when: true
+
+    # -------------------------------------------------------------------------
+    # AdminSDHolder hardening (protect privileged group members)
+    # -------------------------------------------------------------------------
+    - name: Trigger SDProp to enforce AdminSDHolder ACLs
+      ansible.windows.win_shell: |
+        Import-Module ActiveDirectory
+        # Force immediate SDProp run (normally runs every 60 minutes)
+        $RootDSE = [ADSI]"LDAP://RootDSE"
+        $RootDSE.Put("fixupInheritance", 1)
+        $RootDSE.SetInfo()
+        Write-Host "SDProp triggered"
+      changed_when: false
+      failed_when: false
+
+    # -------------------------------------------------------------------------
+    # Password policies
+    # -------------------------------------------------------------------------
+    - name: Set domain default password policy
+      ansible.windows.win_shell: |
+        Import-Module ActiveDirectory
+        Set-ADDefaultDomainPasswordPolicy `
+          -Identity "{{ lab.lab.hosts[inventory_hostname].domain }}" `
+          -MinPasswordLength 8 `
+          -PasswordHistoryCount 5 `
+          -MaxPasswordAge "365.00:00:00" `
+          -MinPasswordAge "0.00:00:00" `
+          -LockoutThreshold 0 `
+          -ComplexityEnabled $false
+      changed_when: true
+
+    # -------------------------------------------------------------------------
+    # Fine-grained password policy: weak policy for lab users
+    # -------------------------------------------------------------------------
+    - name: Create weak PSO for lab user accounts
+      ansible.windows.win_shell: |
+        Import-Module ActiveDirectory
+        $psoName = "LabWeakPolicy"
+        $existing = Get-ADFineGrainedPasswordPolicy -Filter "Name -eq '$psoName'" -ErrorAction SilentlyContinue
+        if (-not $existing) {
+          New-ADFineGrainedPasswordPolicy `
+            -Name $psoName `
+            -Precedence 100 `
+            -MinPasswordLength 1 `
+            -PasswordHistoryCount 0 `
+            -MaxPasswordAge "0.00:00:00" `
+            -MinPasswordAge "0.00:00:00" `
+            -LockoutThreshold 0 `
+            -ComplexityEnabled $false `
+            -ReversibleEncryptionEnabled $false
+          Write-Host "PSO created"
+        } else {
+          Write-Host "PSO already exists"
+        }
+      register: pso_result
+      changed_when: "'created' in pso_result.stdout"
+
+    # -------------------------------------------------------------------------
+    # Disable SMB signing (enables NTLM relay)
+    # -------------------------------------------------------------------------
+    - name: Disable SMB signing on DC (enables NTLM relay attacks)
+      ansible.windows.win_regedit:
+        path: HKLM:\SYSTEM\CurrentControlSet\Services\LanManServer\Parameters
+        name: RequireSecuritySignature
+        data: 0
+        type: dword
+
+    - name: Disable SMB signing requirement on client side
+      ansible.windows.win_regedit:
+        path: HKLM:\SYSTEM\CurrentControlSet\Services\LanManWorkstation\Parameters
+        name: RequireSecuritySignature
+        data: 0
+        type: dword
+
+    # -------------------------------------------------------------------------
+    # LLMNR and NetBIOS - leave enabled for Responder attacks
+    # -------------------------------------------------------------------------
+    - name: Ensure LLMNR is enabled (for Responder scenarios)
+      ansible.windows.win_regedit:
+        path: HKLM:\SOFTWARE\Policies\Microsoft\Windows NT\DNSClient
+        name: EnableMulticast
+        data: 1
+        type: dword
+
+    # -------------------------------------------------------------------------
+    # Sysmon
+    # -------------------------------------------------------------------------
+    - name: Create Sysmon staging directory
+      ansible.windows.win_file:
+        path: C:\Windows\Temp\sysmon
+        state: directory
+
+    - name: Download Sysmon
+      ansible.windows.win_get_url:
+        url: https://download.sysinternals.com/files/Sysmon.zip
+        dest: C:\Windows\Temp\sysmon\Sysmon.zip
+
+    - name: Extract Sysmon
+      ansible.windows.win_shell: |
+        Expand-Archive -Path C:\Windows\Temp\sysmon\Sysmon.zip -DestinationPath C:\Windows\Temp\sysmon -Force
+      args:
+        creates: C:\Windows\Temp\sysmon\Sysmon64.exe
+
+    - name: Copy Sysmon config
+      ansible.windows.win_copy:
+        src: files/sysmon-config.xml
+        dest: C:\Windows\Temp\sysmon\sysmon-config.xml
+
+    - name: Install or update Sysmon
+      ansible.windows.win_shell: |
+        $svc = Get-Service -Name Sysmon64 -ErrorAction SilentlyContinue
+        if ($svc) {
+          & C:\Windows\Temp\sysmon\Sysmon64.exe -c C:\Windows\Temp\sysmon\sysmon-config.xml
+        } else {
+          & C:\Windows\Temp\sysmon\Sysmon64.exe -accepteula -i C:\Windows\Temp\sysmon\sysmon-config.xml
+        }
+      changed_when: true
+
+    # -------------------------------------------------------------------------
+    # GPO: Disable Defender automatic sample submission
+    # -------------------------------------------------------------------------
+    - name: Configure Windows Defender GPO
+      ansible.windows.win_shell: |
+        Import-Module GroupPolicy
+        $gpoName = "Disable Defender Sample Submission"
+        $existing = Get-GPO -Name $gpoName -ErrorAction SilentlyContinue
+        if (-not $existing) {
+          New-GPO -Name $gpoName | Out-Null
+        }
+        Set-GPRegistryValue -Name $gpoName `
+          -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Spynet" `
+          -ValueName "SubmitSamplesConsent" `
+          -Type DWord `
+          -Value 2
+        Set-GPRegistryValue -Name $gpoName `
+          -Key "HKLM\SOFTWARE\Policies\Microsoft\Windows Defender\Exclusions\Paths" `
+          -ValueName "C:\DevTools" `
+          -Type String `
+          -Value "0"
+        $domainDN = (Get-ADDomain).DistinguishedName
+        $linked = Get-GPInheritance -Target $domainDN |
+          Select-Object -ExpandProperty GpoLinks |
+          Where-Object { $_.DisplayName -eq $gpoName }
+        if (-not $linked) {
+          New-GPLink -Name $gpoName -Target $domainDN | Out-Null
+        }
+      changed_when: true
+
+- name: Apply security settings on workstations
+  hosts: workstations
+  gather_facts: false
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Set host facts
+      ansible.builtin.set_fact:
+        host_cfg: "{{ lab.lab.hosts[inventory_hostname] }}"
+
+    - name: Disable SMB signing on workstations
+      ansible.windows.win_regedit:
+        path: HKLM:\SYSTEM\CurrentControlSet\Services\LanManWorkstation\Parameters
+        name: RequireSecuritySignature
+        data: 0
+        type: dword
+
+    # -------------------------------------------------------------------------
+    # Sysmon
+    # -------------------------------------------------------------------------
+    - name: Create Sysmon staging directory
+      ansible.windows.win_file:
+        path: C:\Windows\Temp\sysmon
+        state: directory
+
+    - name: Download Sysmon
+      ansible.windows.win_get_url:
+        url: https://download.sysinternals.com/files/Sysmon.zip
+        dest: C:\Windows\Temp\sysmon\Sysmon.zip
+
+    - name: Extract Sysmon
+      ansible.windows.win_shell: |
+        Expand-Archive -Path C:\Windows\Temp\sysmon\Sysmon.zip -DestinationPath C:\Windows\Temp\sysmon -Force
+      args:
+        creates: C:\Windows\Temp\sysmon\Sysmon64.exe
+
+    - name: Copy Sysmon config
+      ansible.windows.win_copy:
+        src: files/sysmon-config.xml
+        dest: C:\Windows\Temp\sysmon\sysmon-config.xml
+
+    - name: Install or update Sysmon
+      ansible.windows.win_shell: |
+        $svc = Get-Service -Name Sysmon64 -ErrorAction SilentlyContinue
+        if ($svc) {
+          & C:\Windows\Temp\sysmon\Sysmon64.exe -c C:\Windows\Temp\sysmon\sysmon-config.xml
+        } else {
+          & C:\Windows\Temp\sysmon\Sysmon64.exe -accepteula -i C:\Windows\Temp\sysmon\sysmon-config.xml
+        }
+      changed_when: true
+
+    - name: Ensure C:\DevTools exists
+      ansible.windows.win_file:
+        path: C:\DevTools
+        state: directory
+
+    - name: Force GP update to apply Defender exclusion with C:\DevTools present
+      ansible.windows.win_shell: gpupdate /force
+      changed_when: false
+      failed_when: false
+
+    - name: Remove overly broad root drive Defender exclusion if present
+      ansible.windows.win_shell: |
+        $root = $env:SystemDrive + [char]92
+        Remove-MpPreference -ExclusionPath $root -ErrorAction SilentlyContinue
+      changed_when: false
+      failed_when: false

@@ -1,0 +1,18 @@
+---
+- name: Detect NIC names by IP address
+  ansible.windows.win_shell: |
+    $lab = (Get-NetIPAddress -AddressFamily IPv4 |
+      Where-Object { $_.IPAddress -like '192.168.57.*' } |
+      Get-NetAdapter).Name
+    $nat = (Get-NetAdapter -Physical |
+      Where-Object { $_.Name -ne $lab } |
+      Sort-Object ifIndex |
+      Select-Object -First 1).Name
+    [PSCustomObject]@{ nat = $nat; lab = $lab } | ConvertTo-Json -Compress
+  register: _nic_detect
+  changed_when: false
+
+- name: Set NIC name facts
+  ansible.builtin.set_fact:
+    nic_nat: "{{ (_nic_detect.stdout | from_json).nat }}"
+    nic_lab: "{{ (_nic_detect.stdout | from_json).lab }}"

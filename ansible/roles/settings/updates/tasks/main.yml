@@ -1,0 +1,38 @@
+---
+- name: Enable Windows Update service
+  ansible.windows.win_service:
+    name: wuauserv
+    start_mode: auto
+    state: started
+
+- name: Enable automatic updates via registry
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU
+    name: NoAutoUpdate
+    data: 0
+    type: dword
+
+- name: Re-enable Windows Update access
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate
+    name: DisableWindowsUpdateAccess
+    data: 0
+    type: dword
+
+- name: Configure automatic update schedule (download and install at 3am)
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate\AU
+    name: "{{ item.name }}"
+    data: "{{ item.data }}"
+    type: dword
+  loop:
+    - { name: AUOptions,             data: 4 }
+    - { name: ScheduledInstallDay,   data: 0 }
+    - { name: ScheduledInstallTime,  data: 3 }
+
+- name: Enable delivery optimization
+  ansible.windows.win_service:
+    name: DoSvc
+    start_mode: auto
+    state: started
+  failed_when: false

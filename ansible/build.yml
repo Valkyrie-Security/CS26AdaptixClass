@@ -1,0 +1,33 @@
+---
+# Master orchestrator - runs all lab build steps in order
+- name: "[1/10] Configure Windows servers baseline"
+  ansible.builtin.import_playbook: lab-servers.yml
+
+- name: "[2/10] Apply lab settings (updates, defender)"
+  ansible.builtin.import_playbook: lab-settings.yml
+
+- name: "[3/10] Build parent domain"
+  ansible.builtin.import_playbook: lab-domain.yml
+
+- name: "[4/10] Populate AD data (OUs, groups, users)"
+  ansible.builtin.import_playbook: lab-data.yml
+
+- name: "[5/10] Configure AD relations (group memberships)"
+  ansible.builtin.import_playbook: lab-relations.yml
+
+- name: "[6/10] Configure ADCS (Certificate Services)"
+  ansible.builtin.import_playbook: lab-adcs.yml
+
+- name: "[7/10] Apply ACL misconfigurations"
+  ansible.builtin.import_playbook: lab-acl.yml
+
+- name: "[8/10] Apply security settings"
+  ansible.builtin.import_playbook: lab-security.yml
+
+- name: "[9/10] Deploy domain vulnerabilities"
+  ansible.builtin.import_playbook: lab-vulnerabilities.yml
+
+- name: "[10/10] Configure workstation vulnerabilities"
+  ansible.builtin.import_playbook: lab-workstation.yml
+  vars:
+    autologon_user: seth.hawkins

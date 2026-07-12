@@ -1,0 +1,78 @@
+Vagrant.configure("2") do |config|
+
+# Uncomment this depending on the provider you want to use
+ENV['VAGRANT_DEFAULT_PROVIDER'] = 'virtualbox'
+
+boxes = [
+  # windows server 2019
+  { :name => "LAB-DC",  :ip => "192.168.57.10", :box => "StefanScherer/windows_2019", :box_version => "2021.05.15", :os => "windows", :cpus => 2, :mem => 8000},
+  { :name => "LAB-WS01",  :ip => "192.168.57.31", :box => "gusztavvargadr/windows-11", :box_version => "2511.0.0", :os => "windows", :cpus => 2, :mem => 8000}
+]
+  # disable rdp forwarded port inherited from StefanScherer box
+  config.vm.network :forwarded_port, guest: 3389, host: 3389, id: "rdp", auto_correct: true, disabled: true
+
+  # no autoupdate if vagrant-vbguest is installed
+  if Vagrant.has_plugin?("vagrant-vbguest") then
+    config.vbguest.auto_update = false
+  end
+
+  config.vm.boot_timeout = 1200
+  config.vm.graceful_halt_timeout = 600
+  config.winrm.timeout = 1200
+  config.winrm.retry_limit = 60
+  config.winrm.retry_delay = 10
+  config.winrm.ssl_peer_verification = false
+
+  boxes.each do |box|
+    config.vm.define box[:name] do |target|
+      target.vm.provider "virtualbox" do |v|
+        v.name = box[:name]      
+        v.memory = box[:mem]
+        v.cpus = box[:cpus]
+        v.customize ["storageattach", :id,
+          "--storagectl", "IDE Controller",
+          "--port", 1,
+          "--device", 0,
+          "--type", "dvddrive",
+          "--medium", "emptydrive"
+        ]
+      end
+      target.vm.box_download_insecure = box[:box]
+      target.vm.box = box[:box]
+      if box.has_key?(:box_version)
+        target.vm.box_version = box[:box_version]
+      end
+
+      
+      target.vm.synced_folder '.', '/vagrant', disabled: true
+
+      # IP
+      target.vm.network :private_network, ip: box[:ip]
+
+      # OS specific
+      if box[:os] == "windows"
+        target.vm.guest = :windows
+        target.vm.communicator = "winrm"
+        target.vm.provision :shell, :path => "../../scripts/Install-WMF3Hotfix.ps1", privileged: false
+        target.vm.provision :shell, :path => "../../scripts/ConfigWINRM.ps1", privileged: false
+        target.vm.provision :shell, :path => "../../scripts/set-powerplan.ps1", privileged: false
+        target.vm.provision :shell, inline: "echo Rebooting...", reboot: true
+        
+        if ENV['VAGRANT_DEFAULT_PROVIDER'] == "vmware_desktop"
+          target.vm.provision :shell, :path => "../../scripts/fixip.ps1", privileged: false, args: box[:ip]
+        end
+
+      else
+        target.vm.communicator = "ssh"
+      end
+
+      if box.has_key?(:forwarded_port)
+        # forwarded port explicit
+        box[:forwarded_port] do |forwarded_port|
+          target.vm.network :forwarded_port, guest: forwarded_port[:guest], host: forwarded_port[:host], host_ip: "127.0.0.1", id: forwarded_port[:id]
+        end
+      end
+
+    end
+  end
+end

@@ -1,0 +1,55 @@
+---
+- name: Check if Windows Defender is present
+  ansible.windows.win_shell: |
+    (Get-Service -Name WinDefend -ErrorAction SilentlyContinue) -ne $null
+  register: defender_present
+  changed_when: false
+
+- name: Disable Windows Defender real-time protection
+  ansible.windows.win_shell: |
+    Set-MpPreference -DisableRealtimeMonitoring $true
+  when: defender_present.stdout | trim == "True"
+  failed_when: false
+
+- name: Disable Windows Defender via registry (survives reboots)
+  ansible.windows.win_regedit:
+    path: HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender
+    name: DisableAntiSpyware
+    data: 1
+    type: dword
+
+- name: Disable Windows Defender services
+  ansible.windows.win_service:
+    name: "{{ item }}"
+    start_mode: disabled
+    state: stopped
+  loop:
+    - WinDefend
+    - WdNisSvc
+    - WdNisDrv
+    - Sense
+  failed_when: false
+
+- name: Disable Windows Defender scheduled tasks
+  ansible.windows.win_shell: |
+    $tasks = @(
+      "\Microsoft\Windows\Windows Defender\Windows Defender Cache Maintenance",
+      "\Microsoft\Windows\Windows Defender\Windows Defender Cleanup",
+      "\Microsoft\Windows\Windows Defender\Windows Defender Scheduled Scan",
+      "\Microsoft\Windows\Windows Defender\Windows Defender Verification"
+    )
+    foreach ($task in $tasks) {
+      Disable-ScheduledTask -TaskPath (Split-Path $task) -TaskName (Split-Path $task -Leaf) -ErrorAction SilentlyContinue
+    }
+  failed_when: false
+  changed_when: true
+
+- name: Add exclusions for common attack tools
+  ansible.windows.win_shell: |
+    Add-MpPreference -ExclusionPath "C:\setup"
+    Add-MpPreference -ExclusionPath "C:\Users\Public"
+    Add-MpPreference -ExclusionExtension ".ps1"
+    Add-MpPreference -ExclusionExtension ".exe"
+  failed_when: false
+  changed_when: true
+  when: defender_present.stdout | trim == "True"

@@ -1,0 +1,157 @@
+---
+# Promote DC01 to domain controller
+- name: Configure parent domain
+  hosts: dc
+  gather_facts: false
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Set domain facts from config
+      ansible.builtin.set_fact:
+        domain_name: "{{ lab.lab.hosts[inventory_hostname].domain }}"
+        domain_password: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain].domain_password }}"
+        domain_netbios: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain].netbios_name }}"
+        domain_path: "{{ lab.lab.hosts[inventory_hostname].path }}"
+
+    - name: Detect NIC names
+      ansible.builtin.include_tasks: tasks/detect_nics.yml
+
+    - name: Disable NAT NIC (prevents DNS resolution conflicts during domain promotion)
+      ansible.windows.win_shell: |
+        Disable-NetAdapter -Name "{{ nic_nat }}" -Confirm:$false -ErrorAction SilentlyContinue
+      changed_when: true
+      failed_when: false
+
+    - name: Create new AD forest
+      microsoft.ad.domain:
+        dns_domain_name: "{{ domain_name }}"
+        safe_mode_password: "{{ domain_password }}"
+        domain_netbios_name: "{{ domain_netbios }}"
+        install_dns: true
+        reboot: true
+      register: domain_result
+
+    - name: Wait for DC to be fully available after domain promotion
+      ansible.builtin.wait_for_connection:
+        timeout: 600
+        delay: 60
+
+    - name: Re-enable NAT NIC after reboot
+      ansible.windows.win_shell: |
+        $nic = Get-NetAdapter -Name "{{ nic_nat }}" -ErrorAction SilentlyContinue
+        if ($nic -and $nic.Status -ne 'Up') {
+          Enable-NetAdapter -Name "{{ nic_nat }}" -Confirm:$false
+        }
+      changed_when: false
+      failed_when: false
+      ignore_errors: true
+
+    - name: Wait for AD web services to start
+      ansible.windows.win_service:
+        name: ADWS
+        state: started
+      register: adws
+      retries: 10
+      delay: 30
+      until: adws is not failed
+
+    - name: Set domain password policy
+      ansible.builtin.include_role:
+        name: settings/password_policy
+      vars:
+        try_before_lock: "5"
+        pass_length: "5"
+        lock_duration: "00:05:00"
+        lock_observation: "00:05:00"
+        complexity: false
+      tags: policy
+
+    - name: Set DNS forwarder to 8.8.8.8
+      ansible.windows.win_shell: |
+        Add-DnsServerForwarder -IPAddress 8.8.8.8 -PassThru
+      changed_when: false
+      failed_when: false
+
+    - name: Create vagrant domain user and add to Domain Admins
+      microsoft.ad.user:
+        identity: vagrant
+        password: vagrant
+        password_expired: false
+        password_never_expires: true
+        user_cannot_change_password: false
+        enabled: true
+        groups:
+          set:
+            - Domain Admins
+            - Domain Users
+            - Enterprise Admins
+            - Schema Admins
+        state: present
+        domain_username: "Administrator@{{ domain_name }}"
+        domain_password: "{{ domain_password }}"
+        domain_server: "{{ domain_name }}"
+
+    - name: Add custom DNS zones and A records
+      ansible.windows.win_shell: |
+        $zones = @{
+          "socialbabies.com"     = "192.168.57.40"
+          "bigjohnstractors.com" = "192.168.57.40"
+        }
+        foreach ($zone in $zones.GetEnumerator()) {
+          if (-not (Get-DnsServerZone -Name $zone.Key -ErrorAction SilentlyContinue)) {
+            Add-DnsServerPrimaryZone -Name $zone.Key -ReplicationScope Forest -PassThru
+          }
+          if (-not (Get-DnsServerResourceRecord -ZoneName $zone.Key -Name "@" -RRType A -ErrorAction SilentlyContinue)) {
+            Add-DnsServerResourceRecordA -ZoneName $zone.Key -Name "@" -IPv4Address $zone.Value
+          }
+        }
+      args:
+        executable: powershell
+      changed_when: true
+
+- name: Join workstations to domain
+  hosts: workstations
+  gather_facts: false
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Set domain facts
+      ansible.builtin.set_fact:
+        domain_name: "{{ lab.lab.hosts[inventory_hostname].domain }}"
+        domain_password: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain].domain_password }}"
+
+    - name: Detect NIC names
+      ansible.builtin.include_tasks: tasks/detect_nics.yml
+
+    - name: Set DNS on lab NIC to DC01 IP
+      ansible.windows.win_shell: |
+        Set-DnsClientServerAddress -InterfaceAlias "{{ nic_lab }}" -ServerAddresses "{{ hostvars['dc01']['ansible_host'] }}"
+      changed_when: true
+
+    - name: Disable NAT NIC (prevents DNS resolution conflicts during domain join)
+      ansible.windows.win_shell: |
+        Disable-NetAdapter -Name "{{ nic_nat }}" -Confirm:$false -ErrorAction SilentlyContinue
+      changed_when: true
+      failed_when: false
+
+    - name: Join workstation to domain
+      microsoft.ad.membership:
+        dns_domain_name: "{{ domain_name }}"
+        domain_admin_user: "Administrator@{{ domain_name }}"
+        domain_admin_password: "{{ domain_password }}"
+        state: domain
+        reboot: true
+
+    - name: Re-enable NAT NIC after domain join reboot
+      ansible.windows.win_shell: |
+        Enable-NetAdapter -Name "{{ nic_nat }}" -Confirm:$false -ErrorAction SilentlyContinue
+      changed_when: true
+      failed_when: false

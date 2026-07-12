@@ -1,0 +1,214 @@
+---
+# Create OUs, groups, and users driven by config.json and ad/data/groups.json
+- name: Populate Active Directory data
+  hosts: dc
+  gather_facts: false
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Load groups definition
+      ansible.builtin.include_vars:
+        file: "{{ playbook_dir }}/../ad/data/groups.json"
+        name: groups_data
+
+    - name: Set domain facts
+      ansible.builtin.set_fact:
+        domain_name: "{{ lab.lab.hosts[inventory_hostname].domain }}"
+        domain_cfg: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain] }}"
+
+    - name: Build domain path and group list from groups.json
+      ansible.builtin.set_fact:
+        domain_path: "DC={{ domain_name.replace('.', ',DC=') }}"
+        groups_path: "CN=Users,DC={{ domain_name.replace('.', ',DC=') }}"
+
+    # -------------------------------------------------------------------------
+    # Organisation Units
+    # -------------------------------------------------------------------------
+    - name: Create Organisation Units
+      microsoft.ad.ou:
+        name: "{{ item.key }}"
+        path: "{{ item.value.path }}"
+        state: present
+      loop: "{{ lab.lab.domains[domain_name].organisation_units | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Create SRV computers in Servers OU
+      microsoft.ad.computer:
+        name: "SRV{{ '%02d' | format(item) }}"
+        path: "OU=Servers,{{ domain_path }}"
+        state: present
+      loop: "{{ range(1, 21) | list }}"    
+
+    - name: Create WS computers in default Computers container
+      microsoft.ad.computer:
+        name: "WS{{ '%02d' | format(item) }}"
+        path: "CN=Computers,{{ domain_path }}"
+        state: present
+      loop: "{{ range(1, 21) | list }}"
+
+    # -------------------------------------------------------------------------
+    # Global groups - all groups from groups.json at CN=Users,<domain_path>
+    # -------------------------------------------------------------------------
+    # - name: Create all global groups from groups.json
+    #   microsoft.ad.group:
+    #     name: "{{ item }}"
+    #     scope: global
+    #     path: "{{ groups_path }}"
+    #     state: present
+    #   loop: "{{ (groups_data[domain_name] | dict2items | map(attribute='key') | list + groups_data[domain_name] | dict2items | map(attribute='value') | flatten | list) | unique | select('string') | reject('eq', '') | list }}"
+    #   loop_control:
+    #     label: "{{ item }}"
+
+    # -------------------------------------------------------------------------
+    # Groups from config.json - keys and their members (fills gaps from groups.json)
+    # -------------------------------------------------------------------------
+    - name: Create all group keys from config.json
+      microsoft.ad.group:
+        name: "{{ item.key }}"
+        scope: "{{ item.scope }}"
+        path: "{{ groups_path }}"
+        state: present
+      loop: >-
+        {{ (domain_cfg.groups.global | default({}) | dict2items | map('combine', {'scope': 'global'}) | list) +
+           (domain_cfg.groups.domainlocal | default({}) | dict2items | map('combine', {'scope': 'domainlocal'}) | list) +
+           (domain_cfg.groups.universal | default({}) | dict2items | map('combine', {'scope': 'universal'}) | list) }}
+      loop_control:
+        label: "{{ item.scope }}/{{ item.key }}"
+      ignore_errors: true
+
+    # -------------------------------------------------------------------------
+    # Nest child groups inside parent groups
+    # -------------------------------------------------------------------------
+    # - name: Add child groups as members of parent groups
+    #   microsoft.ad.group:
+    #     name: "{{ item.key }}"
+    #     members:
+    #       add: "{{ item.value }}"
+    #     state: present
+    #   loop: "{{ groups_data[domain_name] | dict2items }}"
+    #   loop_control:
+    #     label: "{{ item.key }}"
+    #   when: item.value | length > 0
+    #   ignore_errors: true
+
+    # -------------------------------------------------------------------------
+    # Add group members from config.json (supplements groups.json nesting)
+    # -------------------------------------------------------------------------
+    - name: Add members to groups from config.json
+      microsoft.ad.group:
+        name: "{{ item.key }}"
+        scope: "{{ item.scope }}"
+        members:
+          add: "{{ item.value.members }}"
+        state: present
+      loop: >-
+        {{ (domain_cfg.groups.global | default({}) | dict2items | map('combine', {'scope': 'global'}) | list) +
+           (domain_cfg.groups.domainlocal | default({}) | dict2items | map('combine', {'scope': 'domainlocal'}) | list) +
+           (domain_cfg.groups.universal | default({}) | dict2items | map('combine', {'scope': 'universal'}) | list) }}
+      loop_control:
+        label: "{{ item.scope }}/{{ item.key }}"
+      when:
+        - item.value.members is defined
+        - item.value.members | length > 0
+      ignore_errors: true
+
+    # -------------------------------------------------------------------------
+    # Users
+    # -------------------------------------------------------------------------
+    - name: Create AD users
+      microsoft.ad.user:
+        identity: "{{ item.key }}"
+        firstname: "{{ item.value.firstname | default('') }}"
+        surname: "{{ item.value.surname | default('') }}"
+        password: "{{ item.value.password }}"
+        email: "{{ item.value.email | default('') }}"
+        description: "{{ item.value.description | default('') }}"
+        path: "{{ item.value.path }}"
+        enabled: true
+        password_expired: false
+        password_never_expires: true
+        groups:
+          add: "{{ item.value.groups | default([]) }}"
+        state: present
+      loop: "{{ domain_cfg.users | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+    # -------------------------------------------------------------------------
+    # Set group owners (managed_by) from config.json
+    # Must run after users exist so the manager can be resolved
+    # -------------------------------------------------------------------------
+    - name: Assign managed_by to groups
+      microsoft.ad.group:
+        name: "{{ item.key }}"
+        managed_by: "{{ item.value.managed_by }}"
+        scope: "{{ item.scope }}"
+        state: present
+      loop: >-
+        {{ (domain_cfg.groups.global | default({}) | dict2items | map('combine', {'scope': 'global'}) | list) +
+           (domain_cfg.groups.domainlocal | default({}) | dict2items | map('combine', {'scope': 'domainlocal'}) | list) +
+           (domain_cfg.groups.universal | default({}) | dict2items | map('combine', {'scope': 'universal'}) | list) }}
+      loop_control:
+        label: "{{ item.scope }}/{{ item.key }}"
+      when:
+        - item.value.managed_by is defined
+        - item.key | length > 0
+
+    # -------------------------------------------------------------------------
+    # Set SPNs for Kerberoastable service accounts
+    # -------------------------------------------------------------------------
+    - name: Set SPNs on service accounts
+      microsoft.ad.user:
+        identity: "{{ item.key }}"
+        spn:
+          set: "{{ item.value.spns }}"
+        state: present
+      loop: "{{ domain_cfg.users | dict2items | selectattr('value.spns', 'defined') | list }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+
+# Place flag files on every host that has vulns_vars -> files -> flag defined
+- name: Place flag files on all hosts
+  hosts: cheddarsale
+  gather_facts: false
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Create Administrator profile directories
+      ansible.windows.win_file:
+        path: "C:\\Users\\Administrator\\{{ item }}"
+        state: directory
+      loop:
+        - .ssh
+        - Contacts
+        - Desktop
+        - Documents
+        - Downloads
+        - Favorites
+        - Links
+        - Music
+        - OneDrive
+        - Pictures
+        - Saved Games
+        - Searches
+        - Videos
+
+    - name: Place flag file
+      ansible.windows.win_copy:
+        src: "{{ playbook_dir }}/../ad/{{ lab.lab.hosts[inventory_hostname].vulns_vars.files.flag.src }}"
+        dest: "{{ lab.lab.hosts[inventory_hostname].vulns_vars.files.flag.dest }}"
+      when:
+        - inventory_hostname in lab.lab.hosts
+        - "'files' in lab.lab.hosts[inventory_hostname].vulns"
+        - lab.lab.hosts[inventory_hostname].vulns_vars.files.flag is defined
+

@@ -1,0 +1,74 @@
+---
+# Configure group memberships and managed-by relationships from config.json
+- name: Configure AD group relations
+  hosts: dc
+  gather_facts: false
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Set domain facts
+      ansible.builtin.set_fact:
+        domain_name: "{{ lab.lab.hosts[inventory_hostname].domain }}"
+        domain_cfg: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain] }}"
+
+    # -------------------------------------------------------------------------
+    # Local group memberships on DC (from hosts[dc].local_groups)
+    # -------------------------------------------------------------------------
+    - name: Add domain groups to local groups on DC
+      ansible.windows.win_group_membership:
+        name: "{{ item.key }}"
+        members: "{{ item.value }}"
+        state: present
+      loop: "{{ lab.lab.hosts[inventory_hostname].local_groups | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when: lab.lab.hosts[inventory_hostname].local_groups is defined
+
+    - name: Grant SeRemoteInteractiveLogonRight on DC
+      ansible.windows.win_user_right:
+        name: SeRemoteInteractiveLogonRight
+        users:
+          - Administrators
+          - Remote Desktop Users
+          - "{{ domain_cfg.netbios_name }}\\RDPUsers"
+          - "{{ domain_cfg.netbios_name }}\\RangeAdmin"
+        action: set
+
+- name: Configure local group memberships on workstations
+  hosts: workstations
+  gather_facts: false
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Set domain facts
+      ansible.builtin.set_fact:
+        domain_cfg: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain] }}"
+
+    - name: Add domain groups to local groups on workstations
+      ansible.windows.win_group_membership:
+        name: "{{ item.key }}"
+        members: "{{ item.value }}"
+        state: present
+      loop: "{{ lab.lab.hosts[inventory_hostname].local_groups | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      when: lab.lab.hosts[inventory_hostname].local_groups is defined
+
+    - name: Grant SeRemoteInteractiveLogonRight on workstations
+      ansible.windows.win_user_right:
+        name: SeRemoteInteractiveLogonRight
+        users:
+          - Administrators
+          - Remote Desktop Users
+          - "{{ domain_cfg.netbios_name }}\\RDPUsers"
+          - "{{ domain_cfg.netbios_name }}\\RangeAdmin"
+          - "{{ domain_cfg.netbios_name }}\\marquis.stafford"
+        action: set

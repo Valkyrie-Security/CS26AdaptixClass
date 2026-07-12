@@ -1,0 +1,1 @@
+Set-ADUser -Identity "carmen.bolton" -ServicePrincipalNames @{Add='HTTP/maintenance'}

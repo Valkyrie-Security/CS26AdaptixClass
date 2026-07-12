@@ -1,0 +1,128 @@
+---
+# Install and configure Active Directory Certificate Services (ADCS)
+# Requires: ansible/files/ADCSTemplate/ (download from github.com/GoateePFE/ADCSTemplate)
+- name: Configure Active Directory Certificate Services
+  hosts: dc
+  gather_facts: false
+
+  vars:
+    adcs_templates:
+      - UserAuthentication
+      - GeneralPurpose
+      - EnrollmentAgent
+      - ManagedEnrollment
+      - WorkstationAuth
+      - SecureEmail
+      - VPNAccess
+
+  tasks:
+    - name: Load lab config
+      ansible.builtin.include_vars:
+        file: "{{ lab_config_path }}"
+        name: lab
+
+    - name: Set domain facts
+      ansible.builtin.set_fact:
+        domain_name: "{{ lab.lab.hosts[inventory_hostname].domain }}"
+        domain_cfg: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain] }}"
+        domain_password: "{{ lab.lab.domains[lab.lab.hosts[inventory_hostname].domain].domain_password }}"
+
+    # -------------------------------------------------------------------------
+    # Install ADCS role
+    # -------------------------------------------------------------------------
+    - name: Install ADCS role and management tools
+      ansible.windows.win_feature:
+        name:
+          - ADCS-Cert-Authority
+          - RSAT-ADCS
+          - RSAT-ADCS-Mgmt
+        state: present
+        include_management_tools: true
+      register: adcs_feature
+
+    - name: Reboot if required after ADCS install
+      ansible.windows.win_reboot:
+        reboot_timeout: 300
+        post_reboot_delay: 30
+      when: adcs_feature.reboot_required
+
+    # -------------------------------------------------------------------------
+    # Configure Enterprise Root CA
+    # -------------------------------------------------------------------------
+    - name: Configure Enterprise Root CA
+      ansible.windows.win_shell: |
+        $caName = ("{{ domain_name }}".Split('.')[0]).ToUpper() + "-CA"
+        $configured = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Services\CertSvc\Configuration" -ErrorAction SilentlyContinue).Active
+        if ($configured) {
+          Write-Output "ADCS already configured"
+          exit 0
+        }
+        Install-AdcsCertificationAuthority `
+          -CAType EnterpriseRootCa `
+          -CACommonName $caName `
+          -KeyLength 2048 `
+          -HashAlgorithmName SHA256 `
+          -ValidityPeriod Years `
+          -ValidityPeriodUnits 10 `
+          -CryptoProviderName "RSA#Microsoft Software Key Storage Provider" `
+          -Force
+      register: adcs_setup
+      changed_when: "'already configured' not in adcs_setup.stdout"
+
+    - name: Reboot after CA configuration
+      ansible.windows.win_reboot:
+        reboot_timeout: 300
+        post_reboot_delay: 30
+      when: adcs_setup.changed
+
+    # -------------------------------------------------------------------------
+    # Enable Web Enrollment (ESC8)
+    # -------------------------------------------------------------------------
+    - name: Enable Web Enrollment
+      ansible.windows.win_feature:
+        name: ADCS-Web-Enrollment
+        state: present
+        include_management_tools: true
+      register: web_enroll
+
+    - name: Configure Web Enrollment
+      ansible.windows.win_shell: |
+        Install-AdcsWebEnrollment -Force
+      when: web_enroll.changed
+      changed_when: true
+
+    # -------------------------------------------------------------------------
+    # Install ADCSTemplate PowerShell module
+    # -------------------------------------------------------------------------
+    - name: Install ADCSTemplate module
+      ansible.windows.win_copy:
+        src: files/ADCSTemplate
+        dest: "C:\\Program Files\\WindowsPowerShell\\Modules"
+
+    # -------------------------------------------------------------------------
+    # Copy template JSON files to DC
+    # -------------------------------------------------------------------------
+    # - name: Copy template JSON files to DC
+    #   ansible.windows.win_copy:
+    #     src: "files/ESCTemplates/{{ item }}.json"
+    #     dest: "C:\\setup\\{{ item }}.json"
+    #   with_items: "{{ adcs_templates }}"
+
+    # -------------------------------------------------------------------------
+    # Install and publish templates
+    # -------------------------------------------------------------------------
+    # - name: Install and publish ADCS templates
+    #   ansible.windows.win_shell: |
+    #     if (-not (Get-ADCSTemplate -DisplayName "{{ item }}" -ErrorAction SilentlyContinue)) {
+    #       New-ADCSTemplate -DisplayName "{{ item }}" -JSON (Get-Content "C:\setup\{{ item }}.json" -Raw) -Identity "{{ domain_name }}\Domain Users" -Publish
+    #     } else {
+    #       Write-Output "Template {{ item }} already exists"
+    #     }
+    #   vars:
+    #     ansible_become: true
+    #     ansible_become_method: runas
+    #     ansible_become_user: "Administrator"
+    #     ansible_become_password: "{{ domain_password }}"
+    #   with_items: "{{ adcs_templates }}"
+    #   register: template_result
+    #   changed_when: "'already exists' not in template_result.stdout"
