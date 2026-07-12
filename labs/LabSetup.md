@@ -98,7 +98,7 @@ vagrant plugin install vagrant-reload vagrant-vmware-desktop winrm winrm-fs winr
 ## Step 6 — Deploy Lab VMs
 
 ```powershell
-git clone <CS26ADAPTIXCLASS_REPO_URL>
+git clone https://github.com/Valkyrie-Security/CS26AdaptixClass.git
 cd CS26AdaptixClass\virtualmachines\<virtualbox or vmware>
 vagrant up
 ```
