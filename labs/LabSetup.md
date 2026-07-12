@@ -140,7 +140,7 @@ Create a Kali Linux VM manually with the following specs:
 Boot into Kali, open a terminal, and run:
 
 ```bash
-git clone <CS2026_REPO_URL> ~/CS26AdaptixClass
+git clone https://github.com/Valkyrie-Security/CS26AdaptixClass.git ~/CS26AdaptixClass
 cd ~/CS26AdaptixClass
 chmod +x setup_lab.sh
 ./setup_lab.sh
