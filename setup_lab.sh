@@ -152,7 +152,7 @@ esac
 
 # --- Update system ---
 log "[*] Updating system..."
-sudoit apt update > /dev/null 2>&1 && sudoit apt upgrade -y > /dev/null 2>&1
+sudoit apt update && sudoit apt upgrade -y
 
 # --- Install dependencies ---
 log "[*] Installing OpenSSH, Ansible, and Git..."
