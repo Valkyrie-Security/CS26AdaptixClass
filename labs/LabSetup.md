@@ -42,7 +42,7 @@ bcdedit /set hypervisorlaunchtype off
 ## Step 2 — Install a Hypervisor
 
 Choose **one**:
-### VirtualBox (Recommended)
+### VirtualBox
 - Download: https://www.virtualbox.org/wiki/Downloads
 - Also download the **VirtualBox Extension Pack** from the same page and install it:
   1. Open VirtualBox
