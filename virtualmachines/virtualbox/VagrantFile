@@ -39,6 +39,7 @@ boxes = [
       end
       target.vm.box_download_insecure = box[:box]
       target.vm.box = box[:box]
+      target.vm.box_architecture = "amd64"
       if box.has_key?(:box_version)
         target.vm.box_version = box[:box_version]
       end
