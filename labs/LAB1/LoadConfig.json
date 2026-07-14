@@ -1,5 +1,0 @@
-{
-  "config": "{\"callback_addresses\":[\"192.168.57.40:8181\"],\"encrypt_key\":\"ccee0e3f261f90820d6d529d2a6b6d34\",\"hb_header\":\"X-Tasks-Id\",\"host_bind\":\"0.0.0.0\",\"host_header\":[],\"http_method\":\"GET\",\"page-error\":\"<!DOCTYPE html>\\n<html>\\n<head>\\n<title>ERROR 404 - Nothing Found</title>\\n</head>\\n<body>\\n<h1 class=\\\"cover-heading\\\">ERROR 404 - PAGE NOT FOUND</h1>\\n</div>\\n</div>\\n</div>\\n</body>\\n</html>\",\"page-payload\":\"{\\\"status\\\": \\\"ok\\\", \\\"data\\\": \\\"<<<PAYLOAD_DATA>>>\\\", \\\"metrics\\\": \\\"sync\\\"}\",\"port_bind\":8090,\"request_headers\":\"\",\"server_headers\":\"\",\"ssl\":false,\"ssl_cert\":\"\",\"ssl_key\":\"\",\"uri\":[\"/jscroll/board/list.jpg\",\"/design/dfbox/list.jpg\",\"/design/img/list.jpg\"],\"user_agent\":[\"Mozilla/5.0 (Windows NT 6.2; rv:20.0) Gecko/20121202 Firefox/20.0\"],\"x-forwarded-for\":false}",
-  "name": "LoadConfig",
-  "type": "BeaconHTTP"
-}
