@@ -1,0 +1,5 @@
+{
+    "agent": "beacon",
+    "config": "{\"arch\":\"x64\",\"dns_mode\":\"DNS (Direct UDP)\",\"dns_resolvers\":\"8.8.8.8,1.1.1.1,9.9.9.9\",\"doh_resolvers\":\"https://dns.google/dns-query,https://cloudflare-dns.com/dns-query,https://dns.quad9.net/dns-query\",\"end_time\":\"00:00\",\"format\":\"Exe\",\"iat_hiding\":true,\"is_killdate\":false,\"is_sideloading\":false,\"is_workingtime\":false,\"jitter\":10,\"kill_date\":\"01.01.2000\",\"kill_time\":\"00:00:00\",\"proxy_host\":\"\",\"proxy_password\":\"\",\"proxy_port\":3128,\"proxy_type\":\"http\",\"proxy_username\":\"\",\"rotation_mode\":\"random\",\"sideloading_content\":\"\",\"sleep\":\"10s\",\"start_time\":\"00:00\",\"svcname\":\"AgentService\",\"use_proxy\":false,\"user_agent\":\"Mozilla/5.0 (Windows NT 6.2; rv:20.0) Gecko/20121202 Firefox/20.0\"}",
+    "listener_type": "BeaconHTTP"
+}
