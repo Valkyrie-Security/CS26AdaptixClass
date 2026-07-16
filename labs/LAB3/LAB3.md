@@ -6,8 +6,8 @@
 
 ```bash
 cd ~/AdaptixProjects/<YOUR PROJECT>/Payloads
-chmod +x gopher_agent.bin
-./gopher_agent.bin
+chmod +x gopher_agent.elf
+./gopher_agent.elf
 ```
 
 Confirm the agent called back in the Adaptix client.
