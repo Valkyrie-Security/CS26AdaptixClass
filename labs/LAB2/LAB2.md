@@ -170,13 +170,13 @@ Lucky-Spark is a shellcode stager that fetches a remote payload over HTTP and ex
 
 Download an older version of Luck-Spark. Updates from 7/13 are not working correctly
 ```bash
-git clone https://github.com/orthrus1775/Lucky-Spark.git ~/Lucky-Spark
+git clone https://github.com/orthrus1775/Lucky-Spark.git /opt/Lucky-Spark
 ```
 Update Lucky-Spark 
 ```bash
-sed -i 's/#include <windows.h>/#pragma push_macro("A")\n#pragma push_macro("B")\n#undef A\n#undef B\n#include <windows.h>\n#pragma pop_macro("B")\n#pragma pop_macro("A")/' ~/Lucky-Spark/inc/my_kernel32.h
+sed -i 's/#include <windows.h>/#pragma push_macro("A")\n#pragma push_macro("B")\n#undef A\n#undef B\n#include <windows.h>\n#pragma pop_macro("B")\n#pragma pop_macro("A")/' /opt/Lucky-Spark/inc/my_kernel32.h
 
-sed -i 's/#include <windows.h>/#pragma push_macro("A")\n#pragma push_macro("B")\n#undef A\n#undef B\n#include <windows.h>\n#pragma pop_macro("B")\n#pragma pop_macro("A")/' ~/Lucky-Spark/inc/my_library_utils.h
+sed -i 's/#include <windows.h>/#pragma push_macro("A")\n#pragma push_macro("B")\n#undef A\n#undef B\n#include <windows.h>\n#pragma pop_macro("B")\n#pragma pop_macro("A")/' /opt/Lucky-Spark/inc/my_library_utils.h
 ```
 
 ### Part 2 — Build the Stager
