@@ -168,15 +168,16 @@ Lucky-Spark is a shellcode stager that fetches a remote payload over HTTP and ex
 
 ### Part 1 — Fix Lucky-Spark Headers
 
-Lucky-Spark uses short single-letter macro names (`A`, `B`) for the Affine cipher that conflict with identifiers inside the Windows headers. Apply a one-time fix to both header files before building:
-
+Download an older version of Luck-Spark. Updates from 7/13 are not working correctly
 ```bash
-sed -i 's/#include <windows.h>/#pragma push_macro("A")\n#pragma push_macro("B")\n#undef A\n#undef B\n#include <windows.h>\n#pragma pop_macro("B")\n#pragma pop_macro("A")/' /opt/Lucky-Spark/inc/my_kernel32.h
-
-sed -i 's/#include <windows.h>/#pragma push_macro("A")\n#pragma push_macro("B")\n#undef A\n#undef B\n#include <windows.h>\n#pragma pop_macro("B")\n#pragma pop_macro("A")/' /opt/Lucky-Spark/inc/my_library_utils.h
+git clone https://github.com/orthrus1775/Lucky-Spark.git ~/Lucky-Spark
 ```
+Update Lucky-Spark 
+```bash
+sed -i 's/#include <windows.h>/#pragma push_macro("A")\n#pragma push_macro("B")\n#undef A\n#undef B\n#include <windows.h>\n#pragma pop_macro("B")\n#pragma pop_macro("A")/' ~/Lucky-Spark/inc/my_kernel32.h
 
-This only needs to be done once — the fix survives every rebuild since it lives in the source files, not the generated config.
+sed -i 's/#include <windows.h>/#pragma push_macro("A")\n#pragma push_macro("B")\n#undef A\n#undef B\n#include <windows.h>\n#pragma pop_macro("B")\n#pragma pop_macro("A")/' ~/Lucky-Spark/inc/my_library_utils.h
+```
 
 ### Part 2 — Build the Stager
 
