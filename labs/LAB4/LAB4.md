@@ -144,3 +144,86 @@ Mark `seth.hawkins` as owned, then use saved or public queries to identify a pat
 **Bonus:** How many users have a password in their description field?
 
 ---
+
+## Answers
+
+<details>
+<summary>Task 2</summary>
+
+- Privilege escalation vectors: Unquoted service path (`workflowengine.exe`), password in `Unattend.xml`, autorun `docengine.exe`, AlwaysInstallElevated, Modifiable Service, Modifiable Service Binary
+- SHA-256 of `email.html`: `58573B9AFCBCC4687340A0C828991291C1267E1C21EB9ECC7CEB60FA2B0ED630` `sha256 C:\Users\seth.hawkins\Desktop\email.html`
+- HelpDesk password: `ChangeMe1234!@#$` (found in `email.html`)
+- CD-ROM drives: 2 (Drive D and E) `disks`
+
+</details>
+
+---
+
+<details>
+<summary>Task 3</summary>
+
+- `WS` objects: 20 (WS01–WS20)
+- `SRV` objects: 20 (SRV01–SRV20)
+- Interesting netshare: `CertEnroll`
+- Locked/disabled accounts: 2
+- Accounts without email: `Administrator, Guest, vagrant, krbtgt, sccm-client-push, sccm-account-da, sccm-naa, sccm-sql, cifs_svc, sql_svc, http_svc, exchange_svc, RangeAdmin`
+- Accounts with SPN: 7
+
+</details>
+
+---
+
+<details>
+<summary>Task 4</summary>
+
+- Enterprise CA name: `CHEDDARSALE-CA` hosted on `DC01.cheddarsale.local`
+- Vulnerability: ESC8 — the CA supports HTTP web enrollment without channel binding, enabling NTLM relay attacks against the enrollment endpoint
+- Enabled templates enrollable by Domain Users: `User` and `EFS`
+- Legacy web enrollment URL: `http://DC01.cheddarsale.local/certsrv/`
+
+</details>
+
+---
+
+<details>
+<summary>Task 5</summary>
+
+- Other SharpHound artifact: randomly named `.bin` file
+- Cleanup: remove the `.bin` file and the zip
+
+</details>
+
+---
+
+<details>
+<summary>Task 6</summary>
+
+- DCSync non-admin: No — only Administrators have DCSync permissions
+- CA server: DC01 `PKI Hierachy after clicking on CHEDDARSALE-CA`
+- Users can join computers: Yes — all users can join up to 10 computers `Cypher: Domains where any user can join a computer to the domain`
+- Groups nested in Domain Admins: Windows and Linux groups  `Search Domain Admins and look at "members"`
+- Kerberoastable non-service account: Carmen Bolton `Cypher: All Kerberoastable users`  
+- Other session on WS01: search `WS01` and expand sessions `Search WS01, expand sessions`
+
+</details>
+
+---
+
+<details>
+<summary>Bonus</summary>
+
+Answer: 29
+
+```
+MATCH (u:User)
+WHERE u.description IS NOT NULL
+RETURN u
+```
+
+Export to CSV, then:
+
+```bash
+cat ~/Downloads/nodes.csv | awk -F "," '{print $1}' | grep Password | wc -l
+```
+
+</details>

@@ -191,5 +191,5 @@ The script outputs the generated Affine cipher parameters (`A`, `B`, `INV_A`) â€
 ### Part 3 â€” Copy to WS01
 
 ```bash
-scp /opt/Lucky-Spark/filezilla.exe vagrant@192.168.57.31:C:/DevTools/filezilla.exe
+scp ~/Lucky-Spark/filezilla.exe vagrant@192.168.57.31:C:/DevTools/filezilla.exe
 ```
