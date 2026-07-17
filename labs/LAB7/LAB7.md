@@ -15,6 +15,7 @@ Doppelganger is a BYOVD (Bring Your Own Vulnerable Driver) LSASS dumper that use
         - **Option 2 (Edit project file):** `Project` → `Edit Project File` → `Ctrl+H` → replace `v145` with `v143` → save → right-click `Doppelganger` in `Solution Explorer` → `Reload Project`
     - Rebuild the solution (`Build` → `Rebuild Solution`)
     - Confirm the output at `C:\DevTools\RedTeamGrimoire\Doppelganger\DoppelgangerXObolos\x64\Release\Doppelganger.exe`
+        - **Option 3:** Use the compiled Doppelganger.exe in the lab files  
 
 - Copy the compiled binary from WS01 to the Kali loot directory:
 ```bash
